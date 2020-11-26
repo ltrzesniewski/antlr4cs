@@ -119,8 +119,19 @@ If (-not (Test-Path $nuget)) {
 }
 
 # build the main project
-$visualStudio = (Get-ItemProperty 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\VisualStudio\SxS\VS7')."$VisualStudioVersion"
-$msbuild = "$visualStudio\MSBuild\$VisualStudioVersion\Bin\MSBuild.exe"
+$vsWhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+If (-not (Test-Path $vsWhere)) {
+	$host.UI.WriteErrorLine("Couldn't find vswhere.exe")
+	exit 1
+}
+
+$visualStudio = &$vsWhere -latest -products * -version "$VisualStudioVersion" -requires Microsoft.Component.MSBuild -property installationPath
+If ([string]::IsNullOrEmpty($visualStudio)) {
+	$host.UI.WriteErrorLine("Couldn't find Visual Studio $VisualStudioVersion")
+	exit 1
+}
+
+$msbuild = "$visualStudio\MSBuild\Current\Bin\MSBuild.exe"
 If (-not (Test-Path $msbuild)) {
 	$host.UI.WriteErrorLine("Couldn't find MSBuild.exe")
 	exit 1
@@ -131,6 +142,11 @@ If ($Logger) {
 }
 
 &$nuget 'restore' $SolutionPath -Project2ProjectTimeOut 1200
+if (-not $?) {
+	$host.ui.WriteErrorLine('Restore failed, aborting!')
+	Exit 1
+}
+
 &$msbuild '/nologo' '/m' '/nr:false' "/t:$Target" $LoggerArgument "/verbosity:$Verbosity" "/p:Configuration=$BuildConfig" "/p:VisualStudioVersion=$VisualStudioVersion" "/p:KeyConfiguration=$KeyConfiguration" $SolutionPath
 if (-not $?) {
 	$host.ui.WriteErrorLine('Build failed, aborting!')
@@ -188,6 +204,13 @@ If (-not $NoValidate) {
 	}
 
 	git 'clean' '-dxf' 'DotnetValidationJavaCodegen'
+	dotnet 'run' '--project' '.\DotnetValidationJavaCodegen\DotnetValidation.csproj' '--framework' 'net5.0'
+	if (-not $?) {
+		$host.ui.WriteErrorLine('Build failed, aborting!')
+		Exit $LASTEXITCODE
+	}
+
+	git 'clean' '-dxf' 'DotnetValidationJavaCodegen'
 	&$nuget 'restore' 'DotnetValidationJavaCodegen'
 	&$msbuild '/nologo' '/m' '/nr:false' '/t:Rebuild' $LoggerArgument "/verbosity:$Verbosity" "/p:Configuration=$BuildConfig" '.\DotnetValidationJavaCodegen\DotnetValidation.sln'
 	if (-not $?) {
@@ -236,6 +259,13 @@ If (-not $NoValidate) {
 If (-not $NoValidate) {
 	git 'clean' '-dxf' 'DotnetValidation'
 	dotnet 'run' '--project' '.\DotnetValidation\DotnetValidation.csproj' '--framework' 'netcoreapp1.1'
+	if (-not $?) {
+		$host.ui.WriteErrorLine('Build failed, aborting!')
+		Exit $LASTEXITCODE
+	}
+
+	git 'clean' '-dxf' 'DotnetValidation'
+	dotnet 'run' '--project' '.\DotnetValidation\DotnetValidation.csproj' '--framework' 'net5.0'
 	if (-not $?) {
 		$host.ui.WriteErrorLine('Build failed, aborting!')
 		Exit $LASTEXITCODE
